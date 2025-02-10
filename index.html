@@ -8,12 +8,6 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.6/marked.min.js" integrity="sha512-rvRITpPeEKe4hV9M8XntuXX6nuohzqdR5O3W6nhjTLwkrx0ZgBQuaK4fv5DdOWzs2IaXsGt5h0+nyp9pEuoTXg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js" integrity="sha512-LQNxIMR5rXv7o+b1l8+N1EZMfhG7iFZ9HhnbJkTp4zjNr5Wvst75AqUeFDxeRUa7l5vEDyUiAip//r+EFLLCyA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js" integrity="sha512-iWiuBS5nt6r60fCz26Nd0Zqe0nbk1ZTIQbl3Kv7kYsX+yKMUFHzjaH2+AnM6vp2Xs+gNmaBAVWJjSmuPw76Efg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" integrity="sha512-fHwaWebuwA7NSF5Qg/af4UeDx9XqUpYpOGgubo3yWu+b2IQR4UeQwbb42Ti7gVAjNtVoI/I9TEoYeu9omwcC6g==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.3/purify.min.js" integrity="sha512-Ll+TuDvrWDNNRnFFIM8dOiw7Go7dsHyxRp4RutiIFW/wm3DgDmCnRZow6AqbXnCbpWu93yM1O34q+4ggzGeXVA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-
     <script>
         var require = {
             paths: {
@@ -38,7 +32,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.5.0/semantic.min.css" integrity="sha512-KXol4x3sVoO+8ZsWPFI/r5KBVB/ssCGB5tsv2nVOKwLg33wTFP3fmnXa47FdSVIshVTgsYk/1734xSk9aFIa4A==" crossorigin="anonymous" referrerpolicy="no-referrer">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.5.0/semantic.min.js" integrity="sha512-Xo0Jh8MsOn72LGV8kU5LsclG7SUzJsWGhXbWcYs2MAmChkQzwiW/yTQwdJ8w6UA9C6EVG18GHb/TrYpYCjyAQw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-    <script type="module" src="js/ai.js"></script>
     <script type="module" src="js/electron.js"></script>
     <script type="module" src="js/ide.js"></script>
     <script type="module" src="js/local_storage.js"></script>
@@ -121,7 +114,9 @@
             </div>
         </div>
         <div class="item">
-            <select id="select-language" class="ui search selection dropdown"></select>
+            <div class="ui input">
+                <select id="select-language" class="ui search selection dropdown"></select>
+            </div>
         </div>
         <div class="item">
             <div class="ui left icon transparent input">
@@ -146,11 +141,11 @@
                 <i id="judge0-theme-toggle-btn-icon" class="sun icon"></i>
             </div>
             <div class="item judge0-minimal-hidden judge0-puter-hidden">
-                <button id="judge0-sign-in-btn" class="ui basic button">
+                <button id="judge0-sign-in-btn" class="ui basic labeled icon button">
                     <i class="sign-in icon"></i>
                     Sign in with Puter
                 </button>
-                <button id="judge0-sign-out-btn" class="ui basic button" data-content="Sign out">
+                <button id="judge0-sign-out-btn" class="ui basic labeled icon button" data-content="Sign out">
                     <i class="sign-out icon"></i>
                     <span id="judge0-puter-username">Sign out</span>
                 </button>
@@ -174,38 +169,6 @@
                 <i class="close icon"></i>
                 Close (ESC)
             </div>
-        </div>
-    </div>
-
-    <div id="judge0-chat-container" class="ui segment">
-        <div class="ui top attached borderless mini menu">
-            <div class="right menu">
-                <div class="fitted item">
-                    <select id="judge0-chat-model-select" class="ui search selection dropdown item">
-                        <option>gpt-4o-mini</option>
-                        <option>gpt-4o</option>
-                        <option>o3-mini</option>
-                        <option>o1-mini</option>
-                        <option>claude-3-5-sonnet</option>
-                        <option>deepseek-chat</option>
-                        <option>deepseek-reasoner</option>
-                        <option>meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo</option>
-                        <option>meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo</option>
-                        <option>meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo</option>
-                        <option>mistral-large-latest</option>
-                        <option>pixtral-large-latest</option>
-                        <option>codestral-latest</option>
-                        <option>google/gemma-2-27b-it</option>
-                        <option>grok-beta</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-        <div id="judge0-chat-messages"></div>
-        <div id="judge0-chat-input-container" class="ui basic segment">
-            <form id="judge0-chat-form" class="ui fluid transparent input">
-                <input id="judge0-chat-user-input" type="text" placeholder="Message AI">
-            </form>
         </div>
     </div>
 

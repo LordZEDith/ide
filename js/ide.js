@@ -31,7 +31,7 @@ var fontSize = 13;
 
 var layout;
 
-export var sourceEditor;
+var sourceEditor;
 var stdinEditor;
 var stdoutEditor;
 
@@ -67,36 +67,22 @@ var layoutConfig = {
             type: "column",
             content: [{
                 type: "component",
-                height: 66,
-                componentName: "ai",
-                id: "ai",
-                title: "AI Coding Assistant",
+                componentName: "stdin",
+                id: "stdin",
+                title: "Input",
                 isClosable: false,
                 componentState: {
                     readOnly: false
                 }
             }, {
-                type: "stack",
-                content: [
-                    {
-                        type: "component",
-                        componentName: "stdin",
-                        id: "stdin",
-                        title: "Input",
-                        isClosable: false,
-                        componentState: {
-                            readOnly: false
-                        }
-                    }, {
-                        type: "component",
-                        componentName: "stdout",
-                        id: "stdout",
-                        title: "Output",
-                        isClosable: false,
-                        componentState: {
-                            readOnly: true
-                        }
-                    }]
+                type: "component",
+                componentName: "stdout",
+                id: "stdout",
+                title: "Output",
+                isClosable: false,
+                componentState: {
+                    readOnly: true
+                }
             }]
         }]
     }]
@@ -477,7 +463,7 @@ function refreshLayoutSize() {
 
 window.addEventListener("resize", refreshLayoutSize);
 document.addEventListener("DOMContentLoaded", async function () {
-    $(".ui.selection.dropdown").dropdown();
+    $("#select-language").dropdown();
     $("[data-content]").popup({
         lastResort: "left center"
     });
@@ -521,37 +507,33 @@ document.addEventListener("DOMContentLoaded", async function () {
     $(document).on("keydown", "body", function (e) {
         if (e.metaKey || e.ctrlKey) {
             switch (e.key) {
-                case "Enter":
+                case "Enter": // Ctrl+Enter, Cmd+Enter
                     e.preventDefault();
                     run();
                     break;
-                case "s":
+                case "s": // Ctrl+S, Cmd+S
                     e.preventDefault();
                     saveAction();
                     break;
-                case "o":
+                case "o": // Ctrl+O, Cmd+O
                     e.preventDefault();
                     openAction();
                     break;
-                case "+":
-                case "=":
+                case "+": // Ctrl+Plus
+                case "=": // Some layouts use '=' for '+'
                     e.preventDefault();
                     fontSize += 1;
                     setFontSizeForAllEditors(fontSize);
                     break;
-                case "-":
+                case "-": // Ctrl+Minus
                     e.preventDefault();
                     fontSize -= 1;
                     setFontSizeForAllEditors(fontSize);
                     break;
-                case "0":
+                case "0": // Ctrl+0
                     e.preventDefault();
                     fontSize = 13;
                     setFontSizeForAllEditors(fontSize);
-                    break;
-                case "`":
-                    e.preventDefault();
-                    sourceEditor.focus();
                     break;
             }
         }
@@ -599,10 +581,6 @@ document.addEventListener("DOMContentLoaded", async function () {
                     enabled: false
                 }
             });
-        });
-
-        layout.registerComponent("ai", function (container, state) {
-            container.getElement()[0].appendChild(document.getElementById("judge0-chat-container"));
         });
 
         layout.on("initialised", function () {
