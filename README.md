@@ -1,4 +1,4 @@
-# Judge0 IDE
+# Judge0 IDE with AI
 [![Judge0 IDE Screenshot](./.github/screenshot.png)](https://ide.judge0.com)
 
 [![License](https://img.shields.io/github/license/judge0/ide?color=2185d0&style=flat-square)](https://github.com/judge0/ide/blob/master/LICENSE)
@@ -13,6 +13,35 @@
 Judge0 IDE is using [**Judge0**](https://ce.judge0.com) for executing the user's source code.
 
 Visit https://ide.judge0.com, and enjoy happy coding. :)
+
+## Features
+- **Vanilla JavaScript Only**: Built with pure JavaScript - no npm, no installation, no third-party libraries required
+- **Built-in Bug Finder**: Identify and resolve code errors quickly with AI assistance
+- **Code Composer**: Craft and refine code segments with AI assistance (includes 3 retries if code generation needs improvement)
+- **Interactive Chat**: Get contextual help and suggestions directly within the IDE
+- **Smart AutoComplete**: 
+  - Predicts and suggests code as you type
+  - Accepts natural language instructions while typing
+- **Version Control Features**:
+  - Review changes before implementation
+  - Revert suggested changes
+  - Append newly generated code in chat
+- **Control & Flexibility**:
+  - Cancel and stop AI response processing in all three tabs
+  - Full control over code generation and suggestions
+
+## Local Development
+To run the IDE locally, use Python's built-in HTTP server:
+
+```bash
+# Using Python 3
+python3 -m http.server 8000
+# OR using Python
+python -m http.server 8000
+```
+
+Then open your browser and navigate to:
+http://localhost:8000/
 
 ## Community
 Do you have a question, feature request, or something else on your mind? Or do you want to follow Judge0 news?

@@ -1,0 +1,78 @@
+.editor-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.loading-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    color: white;
+    font-size: 14px;
+}
+
+.loading-spinner .spinner {
+    width: 40px;
+    height: 40px;
+    margin-bottom: 10px;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.loading-spinner .message {
+    font-weight: 500;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Diff highlighting styles */
+.diff-added {
+    background-color: rgba(55, 211, 83, 0.3);
+    border-left: 3px solid #37d353;
+}
+
+.diff-removed {
+    background-color: rgba(241, 76, 76, 0.3);
+    border-left: 3px solid #f14c4c;
+}
+
+.diff-modified {
+    background-color: rgba(45, 157, 95, 0.3);
+    border-left: 3px solid #2d9d5f;
+}
+
+.diff-added-line, .diff-removed-line, .diff-modified-line {
+    opacity: 0.8;
+}
+
+.diff-added-margin, .diff-removed-margin, .diff-modified-margin {
+    width: 5px;
+}
+
+.diff-added-glyph::before {
+    content: '+';
+    color: #37d353;
+}
+
+.diff-removed-glyph::before {
+    content: '-';
+    color: #f14c4c;
+}
+
+.diff-modified-glyph::before {
+    content: '~';
+    color: #2d9d5f;
+} 
