@@ -1,9 +1,7 @@
-import { OpenAIService } from './openai-service.js';
-
 export class AutoComplete {
-    constructor(editor, openAIService) {
+    constructor(editor, service) {
         this.editor = editor;
-        this.openAIService = openAIService;
+        this.service = service;
         this.suggestDelay = 350; // Delay before triggering suggestion
         this.suggestDebounce = null;
         this.currentSuggestion = null;
@@ -14,6 +12,9 @@ export class AutoComplete {
         this.inactivityDelay = 2000; // Wait 2 seconds of inactivity
         this.lastCursorLine = null; // Track the last cursor line
         this.savedContent = null; // Store content below suggestion
+        this.isClearing = false; // Added for the clearSuggestion method
+        this.disposables = []; // Store disposables for cleanup
+        this.isAccepting = false; // Added for the acceptSuggestion method
 
         // Add ghost text styles immediately
         this.addGhostTextStyles();
@@ -45,60 +46,68 @@ export class AutoComplete {
 
     init() {
         // Track user activity (but don't clear suggestions)
-        this.editor.onMouseMove(() => this.updateActivityTime(false));
-        this.editor.onMouseDown(() => this.updateActivityTime(false));
+        this.disposables.push(
+            this.editor.onMouseMove(() => this.updateActivityTime(false)),
+            this.editor.onMouseDown(() => this.updateActivityTime(false))
+        );
 
         // Track cursor position changes
-        this.editor.onDidChangeCursorPosition((e) => {
-            const currentLine = e.position.lineNumber;
-            if (this.lastCursorLine !== null && currentLine !== this.lastCursorLine) {
-                // Clear suggestion if cursor moves to a different line
-                this.clearSuggestion();
-            }
-            this.lastCursorLine = currentLine;
-        });
+        this.disposables.push(
+            this.editor.onDidChangeCursorPosition((e) => {
+                const currentLine = e.position.lineNumber;
+                if (this.lastCursorLine !== null && currentLine !== this.lastCursorLine) {
+                    // Clear suggestion if cursor moves to a different line
+                    this.clearSuggestion();
+                }
+                this.lastCursorLine = currentLine;
+            })
+        );
 
         // Listen for content changes
-        this.editor.onDidChangeModelContent(async (event) => {
-            if (this.isProcessing) return;
-            
-            // Update activity time and clear suggestion only when typing
-            this.updateActivityTime(true);
-            
-            // Clear any existing suggestion timeout
-            if (this.suggestDebounce) {
-                clearTimeout(this.suggestDebounce);
-            }
-
-            // Set a new timeout for suggestion
-            this.suggestDebounce = setTimeout(() => {
-                // Check if enough time has passed since last activity
-                const timeSinceLastActivity = Date.now() - this.lastActivityTime;
-                if (timeSinceLastActivity >= this.inactivityDelay) {
-                    this.triggerSuggestion();
-                } else {
-                    // If user was recently active, wait for inactivity
-                    const remainingWait = this.inactivityDelay - timeSinceLastActivity;
-                    this.suggestDebounce = setTimeout(() => {
-                        // Double check inactivity before triggering
-                        if (Date.now() - this.lastActivityTime >= this.inactivityDelay) {
-                            this.triggerSuggestion();
-                        }
-                    }, remainingWait);
+        this.disposables.push(
+            this.editor.onDidChangeModelContent(async (event) => {
+                if (this.isProcessing) return;
+                
+                // Update activity time and clear suggestion only when typing
+                this.updateActivityTime(true);
+                
+                // Clear any existing suggestion timeout
+                if (this.suggestDebounce) {
+                    clearTimeout(this.suggestDebounce);
                 }
-            }, this.suggestDelay);
-        });
+
+                // Set a new timeout for suggestion
+                this.suggestDebounce = setTimeout(() => {
+                    // Check if enough time has passed since last activity
+                    const timeSinceLastActivity = Date.now() - this.lastActivityTime;
+                    if (timeSinceLastActivity >= this.inactivityDelay) {
+                        this.triggerSuggestion();
+                    } else {
+                        // If user was recently active, wait for inactivity
+                        const remainingWait = this.inactivityDelay - timeSinceLastActivity;
+                        this.suggestDebounce = setTimeout(() => {
+                            // Double check inactivity before triggering
+                            if (Date.now() - this.lastActivityTime >= this.inactivityDelay) {
+                                this.triggerSuggestion();
+                            }
+                        }, remainingWait);
+                    }
+                }, this.suggestDelay);
+            })
+        );
 
         // Listen for keyboard events to accept suggestions
-        this.editor.onKeyDown((e) => {
-            if (this.currentSuggestion && (e.code === 'Tab' || e.code === 'Enter' || (e.ctrlKey && e.code === 'KeyK'))) {
-                e.preventDefault();
-                e.stopPropagation();
-                this.acceptSuggestion();
-            } else if (e.code === 'Escape' && this.currentSuggestion) {
-                this.clearSuggestion();
-            }
-        });
+        this.disposables.push(
+            this.editor.onKeyDown((e) => {
+                if (this.currentSuggestion && (e.code === 'Tab' || e.code === 'Enter' || (e.ctrlKey && e.code === 'KeyK'))) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.acceptSuggestion();
+                } else if (e.code === 'Escape' && this.currentSuggestion) {
+                    this.clearSuggestion();
+                }
+            })
+        );
     }
 
     updateActivityTime(clearSuggestion = false) {
@@ -111,9 +120,9 @@ export class AutoComplete {
 
     async triggerSuggestion() {
         console.log('triggerSuggestion called');
-        if (!this.openAIService || this.isProcessing) {
+        if (!this.service || this.isProcessing) {
             console.log('Skipping suggestion:', {
-                hasOpenAIService: !!this.openAIService,
+                hasService: !!this.service,
                 isProcessing: this.isProcessing
             });
             return;
@@ -134,8 +143,55 @@ export class AutoComplete {
                 fileExtension,
                 selectedLanguage: languageName
             });
-            
+
+            // Get all lines up to cursor for context
+            const allLines = model.getLinesContent();
+            const beforeCursor = allLines.slice(0, position.lineNumber);
             const lineContent = model.getLineContent(position.lineNumber);
+            const currentIndent = lineContent.match(/^\s*/)[0];
+            
+            // Calculate proper indentation level based on syntax
+            let syntaxIndentLevel = 0;
+            const blockStartChars = {
+                'python': ':',
+                'javascript': '{',
+                'typescript': '{',
+                'java': '{',
+                'c': '{',
+                'cpp': '{',
+                'csharp': '{',
+                'php': '{',
+                'ruby': 'do|{',
+                'swift': '{',
+                'go': '{',
+                'rust': '{',
+                'kotlin': '{',
+                'scala': '{',
+            };
+
+            const blockStartChar = blockStartChars[fileExtension] || '';
+            const blockRegex = new RegExp(`${blockStartChar}\\s*$`);
+            
+            // Check if current line ends with a block starter
+            const endsWithBlock = blockRegex.test(lineContent.trim());
+            
+            // Find the indentation level from previous non-empty lines
+            let controlLineIndex = beforeCursor.length - 1;
+            while (controlLineIndex >= 0) {
+                const line = beforeCursor[controlLineIndex].trim();
+                if (line.length > 0) {
+                    const spaces = beforeCursor[controlLineIndex].match(/^\s*/)[0];
+                    syntaxIndentLevel = Math.floor(spaces.length / 4);
+                    if (blockRegex.test(line)) {
+                        syntaxIndentLevel++;
+                    }
+                    break;
+                }
+                controlLineIndex--;
+            }
+            
+            // Increase indent level if current line ends with block starter
+            if (endsWithBlock) syntaxIndentLevel++;
             
             // Check if we're in a comment
             const isLineComment = lineContent.trim().startsWith('//');
@@ -155,7 +211,7 @@ export class AutoComplete {
             const suffix = lineContent.substring(position.column - 1);
 
             // Get suggestion from AI with language context
-            const suggestion = await this.openAIService.autoComplete(
+            const suggestion = await this.service.autoComplete(
                 prefix, 
                 suffix, 
                 new AbortController().signal,
@@ -169,14 +225,27 @@ export class AutoComplete {
                 // Clear any existing decorations and space
                 this.clearSuggestion();
                 
-                const currentIndent = lineContent.match(/^\s*/)[0];
-                const lines = suggestion.trim().split('\n').map(line => currentIndent + line);
+                // Process the suggestion to handle indentation properly
+                let processedSuggestion = suggestion
+                    .split('\n')
+                    .map(line => {
+                        const spaces = line.match(/^ */)[0].length;
+                        const indentLevel = Math.floor(spaces / 4);
+                        return '    '.repeat(indentLevel) + line.trimLeft();
+                    })
+                    .join('\n');
+
+                // Apply the final indentation level
+                const finalIndent = '    '.repeat(syntaxIndentLevel);
+                const lines = processedSuggestion
+                    .split('\n')
+                    .map(line => line.replace(finalIndent, ''))
+                    .map(line => currentIndent + line);
                 
                 // Create space for the suggestion
                 const insertPosition = position.lineNumber + 1;
                 
                 // Save all content after our insertion point before making any changes
-                const allLines = model.getLinesContent();
                 const contentAfter = allLines.slice(insertPosition - 1);
                 this.savedContent = {
                     text: contentAfter.join('\n'),
@@ -304,116 +373,111 @@ export class AutoComplete {
             return;
         }
 
-        // Log the current state of the lines we're about to modify
-        const startLine = this.suggestionMetadata.startLine;
-        const endLine = this.suggestionMetadata.startLine + this.suggestionMetadata.numberOfLines;
-        
-        // Get all content after our insertion point
-        const allLines = model.getLinesContent();
-        const contentAfter = allLines.slice(endLine);
-        
-        console.log("Current editor state:", {
-            linesBefore: model.getLinesContent().slice(startLine - 1, endLine),
-            totalLines: model.getLineCount(),
-            suggestionLines: this.currentSuggestion.split('\n')
-        });
+        try {
+            // Set flag to prevent content restoration
+            this.isAccepting = true;
 
-        // Split the suggestion into lines and ensure proper line endings
-        const suggestionLines = this.currentSuggestion.split('\n');
-        const textToInsert = suggestionLines.join('\n') + '\n\n' + contentAfter.join('\n');
+            // Log the current state of the lines we're about to modify
+            const startLine = this.suggestionMetadata.startLine;
+            const endLine = this.suggestionMetadata.startLine + this.suggestionMetadata.numberOfLines;
+            
+            console.log("Current editor state:", {
+                linesBefore: model.getLinesContent().slice(startLine - 1, endLine),
+                totalLines: model.getLineCount(),
+                suggestionLines: this.currentSuggestion.split('\n')
+            });
 
-        // Create a range for just the insertion point
-        const range = new monaco.Range(
-            startLine,
-            1,
-            startLine,
-            1
-        );
+            // Split the suggestion into lines and ensure proper line endings
+            const suggestionLines = this.currentSuggestion.split('\n');
+            const textToInsert = suggestionLines.join('\n') + '\n';  // Add extra newline
 
-        console.log("Edit operation details:", {
-            range: {
-                startLine: range.startLineNumber,
-                startColumn: range.startColumn,
-                endLine: range.endLineNumber,
-                endColumn: range.endColumn
-            },
-            text: textToInsert,
-            textLines: suggestionLines,
-            numberOfLines: suggestionLines.length
-        });
+            // Execute the edit with proper undo/redo support
+            this.editor.pushUndoStop();
+            
+            // Replace the empty lines with the actual suggestion
+            this.editor.executeEdits('accept-suggestion', [{
+                range: new monaco.Range(
+                    startLine,
+                    1,
+                    endLine,
+                    1
+                ),
+                text: textToInsert
+            }]);
 
-        // Execute the edit with proper undo/redo support
-        this.editor.pushUndoStop();
-        
-        // First remove the empty lines
-        this.editor.executeEdits('remove-space', [{
-            range: new monaco.Range(
-                startLine,
-                1,
-                endLine,
-                1
-            ),
-            text: ''
-        }]);
+            this.editor.pushUndoStop();
 
-        // Then insert the actual content
-        const editResult = this.editor.executeEdits('suggestion', [{
-            range: range,
-            text: textToInsert,
-            forceMoveMarkers: true
-        }]);
-
-        console.log("Edit result:", {
-            success: editResult,
-            linesAfter: model.getLinesContent().slice(startLine - 1, startLine + suggestionLines.length),
-            totalLinesAfter: model.getLineCount(),
-            insertedContent: textToInsert
-        });
-
-        this.editor.pushUndoStop();
-
-        // Clear the suggestion state and decorations
-        this.currentSuggestion = null;
-        this.suggestionMetadata = null;
-        this.decorations = this.editor.deltaDecorations(this.decorations, []);
+            // Clear decorations and state
+            this.decorations = this.editor.deltaDecorations(this.decorations, []);
+            this.currentSuggestion = null;
+            this.suggestionMetadata = null;
+            this.savedContent = null;
+        } finally {
+            this.isAccepting = false;
+        }
     }
 
     clearSuggestion() {
-        if (this.currentSuggestion && this.suggestionMetadata) {
-            const model = this.editor.getModel();
-            if (!model) return;
+        // Guard against recursive calls
+        if (this.isClearing) return;
+        this.isClearing = true;
 
-            this.editor.pushUndoStop();
-            
-            // First remove the empty lines
-            this.editor.executeEdits('remove-space', [{
-                range: new monaco.Range(
-                    this.suggestionMetadata.startLine,
-                    1,
-                    this.suggestionMetadata.startLine + this.suggestionMetadata.numberOfLines,
-                    1
-                ),
-                text: ''
-            }]);
+        try {
+            if (this.currentSuggestion && this.suggestionMetadata) {
+                const model = this.editor.getModel();
+                if (!model) return;
 
-            // Then restore the original content if we have it
-            if (this.savedContent) {
-                this.editor.executeEdits('restore-content', [{
-                    range: new monaco.Range(
-                        this.savedContent.startLine,
-                        1,
-                        this.savedContent.startLine,
-                        1
-                    ),
-                    text: this.savedContent.text
-                }]);
-                this.savedContent = null;
+                // Only restore content if we're not accepting the suggestion
+                if (!this.isAccepting) {
+                    this.editor.pushUndoStop();
+                    
+                    // Remove the empty lines
+                    this.editor.executeEdits('clear-suggestion', [{
+                        range: new monaco.Range(
+                            this.suggestionMetadata.startLine,
+                            1,
+                            this.suggestionMetadata.startLine + this.suggestionMetadata.numberOfLines,
+                            1
+                        ),
+                        text: ''
+                    }]);
+
+                    this.editor.pushUndoStop();
+                }
             }
 
-            this.editor.pushUndoStop();
+            // Clear state
+            this.currentSuggestion = null;
             this.suggestionMetadata = null;
+            this.savedContent = null;
+            this.decorations = this.editor.deltaDecorations(this.decorations, []);
+        } finally {
+            this.isClearing = false;
         }
+    }
+
+    dispose() {
+        // Clear any pending suggestions
+        this.clearSuggestion();
+        
+        // Clear any pending timeouts
+        if (this.suggestDebounce) {
+            clearTimeout(this.suggestDebounce);
+            this.suggestDebounce = null;
+        }
+
+        // Remove event listeners
+        if (this.disposables) {
+            this.disposables.forEach(d => d.dispose());
+            this.disposables = [];
+        }
+
+        // Clear state
+        this.editor = null;
+        this.service = null;
         this.currentSuggestion = null;
-        this.decorations = this.editor.deltaDecorations(this.decorations, []);
+        this.suggestionMetadata = null;
+        this.decorations = [];
+        this.savedContent = null;
     }
 } 

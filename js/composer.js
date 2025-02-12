@@ -1,9 +1,7 @@
-import { OpenAIService } from './openai-service.js';
-
 export class Composer {
-    constructor(editor, openAIService) {
+    constructor(editor, service) {
         this.editor = editor;
-        this.openAIService = openAIService;
+        this.service = service;
         this.isProcessing = false;
         this.abortController = null;
         this.maxAttempts = 3;
@@ -55,7 +53,7 @@ export class Composer {
 
                 try {
                     // Get modified code from AI
-                    const modifiedCode = await this.openAIService.integrateCode(
+                    const modifiedCode = await this.service.integrateCode(
                         currentContent,
                         '',  // No new code to integrate, just modifying existing
                         this.abortController.signal,

@@ -1,6 +1,8 @@
-import { OpenAIService } from './openai-service.js';
+import { OpenAIService } from './openai_service.js';
+import { AnthropicService } from './anthropic_service.js';
 import { Composer } from './composer.js';
-import { BugFinder } from './bugfinder.js';
+import { BugFinder } from './bug_finder.js';
+import { AutoComplete } from './auto_complete.js';
 
 // Function to safely get the current file name
 function getCurrentFileName() {
@@ -44,270 +46,28 @@ function getMonacoLanguage(language) {
     return languageMap[language?.toLowerCase()] || 'plaintext';
 }
 
-// Add composer instance
-let composer;
+// Helper function to create appropriate service instance
+function createService(type, apiKey) {
+    switch (type?.toLowerCase()) {
+        case 'anthropic':
+            return new AnthropicService(apiKey);
+        case 'openai':
+        default:
+            return new OpenAIService(apiKey);
+    }
+}
 
-// Add bugfinder instance
+let service;
+let composer;
 let bugFinder;
+let autoComplete;
 
 export function initChat(container, state) {
-    let openAIService;
     let activeTab = 'CHAT';
     let abortController;
 
     // Create the chat component HTML
     const chatHTML = `
-        <style>
-            .diff-added {
-                background-color: rgba(40, 167, 69, 0.2) !important;
-            }
-            .diff-added-gutter {
-                border-left: 3px solid #28a745 !important;
-            }
-            .diff-added-glyph:before {
-                content: '+';
-                color: #28a745;
-            }
-            
-            .diff-removed {
-                background-color: rgba(220, 53, 69, 0.2) !important;
-                text-decoration: line-through;
-            }
-            .diff-removed-gutter {
-                border-left: 3px solid #dc3545 !important;
-            }
-            .diff-removed-glyph:before {
-                content: '-';
-                color: #dc3545;
-            }
-            
-            .diff-modified {
-                background-color: rgba(255, 193, 7, 0.2) !important;
-            }
-            .diff-modified-gutter {
-                border-left: 3px solid #ffc107 !important;
-            }
-            .diff-modified-glyph:before {
-                content: '•';
-                color: #ffc107;
-            }
-
-            /* Container and layout styles */
-            .chat-container {
-                position: relative;
-                height: 100%;
-                display: flex;
-                flex-direction: column;
-            }
-
-            .chat-tabs {
-                padding: 0.5rem;
-                background: #1e1e1e;
-                border-bottom: 1px solid #333;
-                display: flex;
-                gap: 0.5rem;
-            }
-
-            .chat-tab {
-                padding: 0.5rem 1rem;
-                cursor: pointer;
-                border-radius: 4px;
-                background: #2d2d2d;
-                border: 1px solid transparent;
-                color: #888;
-                transition: all 0.2s ease;
-            }
-
-            .chat-tab:hover {
-                background: #363636;
-                color: #fff;
-            }
-
-            .chat-tab.active {
-                background: #363636;
-                color: #fff;
-                border-color: #444;
-            }
-
-            .model-selector-container {
-                padding: 0.5rem;
-                background: #1e1e1e;
-                border-bottom: 1px solid #333;
-            }
-
-            /* Content area styles */
-            .chat-content,
-            .composer-content,
-            .settings-container {
-                flex: 1;
-                display: none;
-                height: calc(100% - 85px);
-                overflow: hidden;
-                flex-direction: column;
-            }
-
-            /* Messages area styles */
-            .chat-messages,
-            .composer-messages {
-                flex: 1;
-                overflow-y: auto;
-                padding: 1rem;
-            }
-
-            /* Input container styles */
-            .chat-input-container,
-            .composer-input-container {
-                padding: 1rem;
-                background: #1e1e1e;
-                border-top: 1px solid #333;
-            }
-
-            .chat-input-wrapper,
-            .composer-input-wrapper {
-                display: flex;
-                gap: 0.5rem;
-                align-items: flex-start;
-            }
-
-            /* Input styles */
-            .chat-input,
-            .composer-input {
-                flex: 1;
-                min-height: 38px;
-                padding: 8px;
-                background: #2d2d2d;
-                border: 1px solid #444;
-                border-radius: 4px;
-                color: #fff;
-                resize: vertical;
-            }
-
-            /* Button styles */
-            .chat-submit,
-            .composer-submit,
-            .stop-composer-btn {
-                padding: 8px 16px;
-                background: #2d2d2d;
-                border: 1px solid #444;
-                border-radius: 4px;
-                color: #fff;
-                cursor: pointer;
-            }
-
-            .stop-composer-btn {
-                background-color: #dc3545;
-                margin-left: 0.5rem;
-            }
-
-            /* Message styles */
-            .message {
-                margin-bottom: 1rem;
-                padding: 0.5rem;
-                border-radius: 4px;
-            }
-
-            .message.user {
-                background: #2d2d2d;
-            }
-
-            .message.assistant {
-                background: #1e1e1e;
-            }
-
-            .message.error {
-                background: rgba(220, 53, 69, 0.2);
-                color: #dc3545;
-            }
-
-            .message.system {
-                background: rgba(40, 167, 69, 0.2);
-                color: #28a745;
-            }
-
-            .floating-diff-actions {
-                background: #2d2d2d;
-                padding: 8px;
-                border-radius: 4px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-            }
-
-            .floating-diff-actions button {
-                margin: 0 4px;
-                padding: 6px 12px;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-size: 12px;
-                transition: opacity 0.2s;
-            }
-
-            .floating-diff-actions .accept-changes {
-                background: #28a745;
-                color: white;
-            }
-
-            .floating-diff-actions .reject-changes {
-                background: #dc3545;
-                color: white;
-            }
-
-            .floating-diff-actions button:hover {
-                opacity: 0.9;
-            }
-
-            /* Code block action buttons */
-            .code-block-action.revert {
-                background-color: #dc3545;
-                color: white;
-            }
-            
-            .code-block-action.reapply {
-                background-color: #28a745;
-                color: white;
-            }
-
-            .code-block-action.changes {
-                background-color: #0e639c;
-                color: white;
-            }
-
-            .code-block-action.changes:hover {
-                background-color: #1177bb;
-            }
-
-            .bugfinder-content {
-                flex: 1;
-                display: none;
-                height: calc(100% - 85px);
-                overflow: hidden;
-                flex-direction: column;
-                position: relative;
-            }
-
-            .bugfinder-messages {
-                flex: 1;
-                overflow-y: auto;
-                padding: 1rem;
-                padding-bottom: 5rem;
-            }
-
-            .bugfinder-input-container {
-                position: absolute;
-                bottom: 0;
-                left: 0;
-                right: 0;
-                background: #1e1e1e;
-                border-top: 1px solid #333;
-                padding: 1rem;
-                z-index: 10;
-            }
-
-            .bugfinder-input-wrapper {
-                display: flex;
-                gap: 0.5rem;
-                align-items: flex-start;
-            }
-        </style>
         <div class="chat-container">
             <div class="chat-tabs">
                 <div class="chat-tab active" data-tab="CHAT">CHAT</div>
@@ -317,8 +77,7 @@ export function initChat(container, state) {
             </div>
             <div class="model-selector-container">
                 <select class="model-selector">
-                    <option value="gpt-4o">GPT-4</option>
-                    <option value="gpt-4o-mini" selected>GPT-4 Mini</option>
+                    <option value="" disabled selected>Select a model...</option>
                 </select>
             </div>
             <div class="chat-content" data-content="CHAT">
@@ -364,14 +123,28 @@ export function initChat(container, state) {
             </div>
             <div class="settings-container" style="display: none;">
                 <div class="settings-section">
-                    <h3>API Keys</h3>
+                    <h3>AI Service Configuration</h3>
+                    <div class="service-selector-section">
+                        <label for="service-selector">Select AI Service:</label>
+                        <select class="service-selector">
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic">Anthropic</option>
+                        </select>
+                    </div>
                     <div class="api-key-section">
-                        <label>OpenAI API Key</label>
+                        <label class="api-key-label">API Key:</label>
                         <div class="api-key-input-wrapper">
-                            <input type="password" class="api-key-input" placeholder="Enter OpenAI API Key">
-                            <i class="api-key-status arrow right icon"></i>
+                            <input type="password" class="api-key-input" placeholder="Enter your API key">
+                            <i class="check circle outline icon api-key-status"></i>
                         </div>
+                        <p class="api-key-description">Your API key is stored locally and never sent to our servers.</p>
                         <button class="api-key-submit">Save API Key</button>
+                    </div>
+                    <div class="model-section">
+                        <h4>Available Models</h4>
+                        <div class="model-list">
+                            <!-- Model cards will be added here -->
+                        </div>
                     </div>
                 </div>
             </div>
@@ -398,88 +171,222 @@ export function initChat(container, state) {
     const bugfinderMessages = container.getElement().find('.bugfinder-messages');
     const stopBugfinderBtn = container.getElement().find('.stop-bugfinder-btn');
 
-    // Function to update API key status indicator
-    async function updateApiKeyStatus(apiKey) {
-        if (!apiKey) {
-            apiKeyStatus.removeClass('valid invalid');
-            return;
-        }
+    // Update the service selector event handler
+    const serviceSelector = container.getElement().find('.service-selector');
+    const serviceNameLabel = container.getElement().find('.service-name-label');
+    const modelSection = container.getElement().find('.model-section');
+    const modelList = container.getElement().find('.model-list');
 
-        try {
-            const tempService = new OpenAIService(apiKey);
-            const isValid = await tempService.validateApiKey();
-            
-            apiKeyStatus.removeClass('valid invalid');
-            if (isValid) {
-                apiKeyStatus.addClass('valid');
-            } else {
-                apiKeyStatus.addClass('invalid');
+    serviceSelector.on('change', async function() {
+        const serviceType = $(this).val();
+        const savedApiKey = localStorage.getItem(`${serviceType}_api_key`);
+        
+        if (savedApiKey) {
+            $('.api-key-input').val(savedApiKey);
+            try {
+                service = createService(serviceType, savedApiKey);
+                await updateApiKeyStatus(savedApiKey);
+                
+                // Store the new service type immediately
+                localStorage.setItem('last_service_type', serviceType);
+                
+                // Update model selector and cards for the new service
+                const ServiceClass = service.constructor;
+                const models = ServiceClass.getSupportedModels();
+                
+                modelSelector.empty();
+                modelList.empty();
+                
+                models.forEach(modelId => {
+                    const modelInfo = ServiceClass.MODEL_INFO[modelId];
+                    
+                    // Add to dropdown
+                    const option = new Option(modelInfo.displayName, modelId);
+                    if (modelId === service.model) {
+                        option.selected = true;
+                    }
+                    modelSelector.append(option);
+                    
+                    // Create model card
+                    const modelCard = $('<div class="model-card' + (modelId === service.model ? ' selected' : '') + '" data-model-id="' + modelId + '">' +
+                        '<div class="model-card-header">' +
+                        '<div class="model-name">' + modelInfo.displayName + '</div>' +
+                        '</div>' +
+                        '<div class="model-description">' + modelInfo.description + '</div>' +
+                        '</div>');
+                    modelList.append(modelCard);
+                });
+
+                // Update or initialize AutoComplete with the new service
+                if (window.sourceEditor) {
+                    if (autoComplete) {
+                        // Dispose of the old instance first
+                        autoComplete.dispose();
+                    }
+                    // Create a new instance with the new service
+                    autoComplete = new AutoComplete(window.sourceEditor, service);
+                }
+            } catch (error) {
+                console.error('Error initializing service:', error);
+                // Keep settings visible if there's an error
+                settingsContainer.show();
             }
-        } catch (error) {
-            apiKeyStatus.removeClass('valid').addClass('invalid');
-        }
-    }
-
-    // Check for saved API key
-    const savedApiKey = localStorage.getItem('openai_api_key');
-    if (savedApiKey) {
-        try {
-            openAIService = new OpenAIService(savedApiKey);
-            apiKeyInput.val(savedApiKey);
-            updateApiKeyStatus(savedApiKey);
-            settingsContainer.hide();
-        } catch (error) {
-            console.error('Error initializing OpenAI service:', error);
+        } else {
+            $('.api-key-input').val('');
+            $('.api-key-status').removeClass('valid invalid');
+            $('.model-list').empty();
+            modelSelector.empty().append('<option value="" disabled selected>Select a model...</option>');
+            // Keep settings visible when no API key is found
             settingsContainer.show();
         }
-    } else {
-        settingsContainer.show();
-        addMessage('system', 'Please enter your OpenAI API key in the Settings tab to start chatting.');
-    }
-
-    // Handle API key input changes
-    apiKeyInput.on('input', function() {
-        const apiKey = $(this).val().trim();
-        updateApiKeyStatus(apiKey);
     });
+
+    // Update the API key validation and model display
+    async function updateApiKeyStatus(apiKey) {
+        try {
+            if (!apiKey) {
+                $('.api-key-status').removeClass('valid invalid');
+                modelSelector.empty().append('<option value="" disabled selected>Select a model...</option>');
+                modelList.empty();
+                addMessage('system', 'Please enter your API key to start chatting.');
+                // Keep settings visible when no API key is provided
+                settingsContainer.show();
+                return false;
+            }
+
+            const serviceType = $('.service-selector').val();
+            const isValid = await service.validateApiKey();
+            
+            if (isValid) {
+                $('.api-key-status').removeClass('invalid').addClass('valid');
+                localStorage.setItem(`${serviceType}_api_key`, apiKey);
+                localStorage.setItem('last_service_type', serviceType);
+                
+                // Update model selector and model list
+                modelSelector.empty();
+                modelList.empty();
+                
+                const ServiceClass = service.constructor;
+                const models = ServiceClass.getSupportedModels();
+                
+                models.forEach(modelId => {
+                    const modelInfo = ServiceClass.MODEL_INFO[modelId];
+                    
+                    // Add to dropdown
+                    const option = new Option(modelInfo.displayName, modelId);
+                    if (modelId === service.model) {
+                        option.selected = true;
+                    }
+                    modelSelector.append(option);
+                    
+                    // Create model card
+                    const modelCard = $('<div class="model-card' + (modelId === service.model ? ' selected' : '') + '" data-model-id="' + modelId + '">' +
+                        '<div class="model-card-header">' +
+                        '<div class="model-name">' + modelInfo.displayName + '</div>' +
+                        '</div>' +
+                        '<div class="model-description">' + modelInfo.description + '</div>' +
+                        '</div>');
+                    modelList.append(modelCard);
+                });
+
+                // Only hide settings if we're not in the Settings tab
+                if (activeTab !== 'SETTINGS') {
+                    settingsContainer.hide();
+                    chatMessages.show();
+                    chatInput.parent().parent().show();
+                }
+                
+                addMessage('system', 'API key saved successfully. You can now use the chat!');
+                return true;
+            } else {
+                $('.api-key-status').removeClass('valid').addClass('invalid');
+                modelSelector.empty().append('<option value="" disabled selected>Select a model...</option>');
+                modelList.empty();
+                addMessage('error', 'Invalid API key. Please check your key and try again.');
+                // Keep settings visible when API key is invalid
+                settingsContainer.show();
+                return false;
+            }
+        } catch (error) {
+            console.error('Error validating API key:', error);
+            $('.api-key-status').removeClass('valid').addClass('invalid');
+            modelSelector.empty().append('<option value="" disabled selected>Select a model...</option>');
+            modelList.empty();
+            addMessage('error', 'Error validating API key: ' + error.message);
+            // Keep settings visible when there's an error
+            settingsContainer.show();
+            return false;
+        }
+    }
 
     // Handle API key submission
     apiKeySubmit.on('click', async () => {
+        const serviceType = serviceSelector.val();
         const apiKey = apiKeyInput.val().trim();
+        
         if (!apiKey) {
             addMessage('error', 'Please enter an API key.');
             return;
         }
 
         try {
-            const tempService = new OpenAIService(apiKey);
-            const isValid = await tempService.validateApiKey();
-            
-            if (!isValid) {
-                addMessage('error', 'Invalid API key. Please check your key and try again.');
-                apiKeyStatus.removeClass('valid').addClass('invalid');
-                return;
-            }
-
-            openAIService = tempService;
-            localStorage.setItem('openai_api_key', apiKey);
-            apiKeyStatus.removeClass('invalid').addClass('valid');
-            settingsContainer.hide();
-            chatMessages.show();
-            chatInput.parent().parent().show();
-            chatTabs.filter('[data-tab="CHAT"]').click();
-            addMessage('system', 'API key saved successfully. You can now use the chat!');
+            service = createService(serviceType, apiKey);
+            await updateApiKeyStatus(apiKey);
         } catch (error) {
-            apiKeyStatus.removeClass('valid').addClass('invalid');
             addMessage('error', 'Error validating API key: ' + error.message);
         }
     });
 
     // Handle model selection
     modelSelector.on('change', function() {
-        if (openAIService) {
-            openAIService.model = modelSelector.val();
+        const selectedModel = $(this).val();
+        if (service && selectedModel) {
+            service.setModel(selectedModel);
         }
+    });
+
+    // Initialize the chat component
+    async function initializeChat() {
+        // Check for saved API key on initialization
+        const savedServiceType = localStorage.getItem('last_service_type') || 'openai';
+        $('.service-selector').val(savedServiceType);
+        const savedApiKey = localStorage.getItem(`${savedServiceType}_api_key`);
+
+        if (savedApiKey) {
+            try {
+                $('.api-key-input').val(savedApiKey);
+                service = createService(savedServiceType, savedApiKey);
+                const isValid = await updateApiKeyStatus(savedApiKey);
+                
+                if (isValid) {
+                    settingsContainer.hide();
+                    chatMessages.show();
+                    chatInput.parent().parent().show();
+                    
+                    // Initialize AutoComplete with the service
+                    if (window.sourceEditor && !autoComplete) {
+                        autoComplete = new AutoComplete(window.sourceEditor, service);
+                    }
+                } else {
+                    settingsContainer.show();
+                    addMessage('system', 'Please enter a valid API key to start chatting.');
+                }
+            } catch (error) {
+                console.error('Error initializing service:', error);
+                settingsContainer.show();
+                addMessage('system', 'Please enter your API key to start chatting.');
+            }
+        } else {
+            settingsContainer.show();
+            addMessage('system', 'Please enter your API key to start chatting.');
+        }
+    }
+
+    // Call the initialization function
+    initializeChat().catch(error => {
+        console.error('Error during initialization:', error);
+        settingsContainer.show();
+        addMessage('system', 'An error occurred during initialization. Please try again.');
     });
 
     // Handle tab switching
@@ -524,6 +431,15 @@ export function initChat(container, state) {
         const messageDiv = $('<div></div>')
             .addClass('message')
             .addClass(role);
+
+        // If it's a system message, set it to disappear after 3.5 seconds
+        if (role === 'system') {
+            setTimeout(() => {
+                messageDiv.fadeOut(500, function() {
+                    $(this).remove();
+                });
+            }, 3500);
+        }
 
         if (typeof content === 'string') {
             const messageContent = $('<div></div>')
@@ -576,8 +492,8 @@ export function initChat(container, state) {
                             window.getSelection().removeAllRanges();
                             
                             // Generate new response
-                            if (openAIService) {
-                                const responseStream = openAIService.chat(newText, abortController.signal);
+                            if (service) {
+                                const responseStream = service.chat(newText, abortController.signal);
                                 handleStreamingResponse(responseStream).then(() => {
                                 }).catch(error => {
                                     if (error.message !== 'Request was cancelled') {
@@ -948,7 +864,7 @@ export function initChat(container, state) {
                             </div>
                         `).appendTo(document.evaluate('/html/body/div[2]/div/div/div[1]', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue);
 
-                        await applyChanges(sourceEditor, code, openAIService, addMessage, chatMessages);
+                        await applyChanges(sourceEditor, code, service, addMessage, chatMessages);
 
                         // Remove the overlay with a fade effect
                         editorOverlay.fadeOut(200, () => {
@@ -993,80 +909,27 @@ export function initChat(container, state) {
                             </div>
                         `).appendTo('body');
 
-                        // Add styles for the popup
-                        const styleElement = $(`
-                            <style>
-                                .diff-popup-overlay {
-                                    position: fixed;
-                                    top: 0;
-                                    left: 0;
-                                    right: 0;
-                                    bottom: 0;
-                                    background: rgba(0, 0, 0, 0.7);
-                                    display: flex;
-                                    justify-content: center;
-                                    align-items: center;
-                                    z-index: 9999;
-                                }
-                                .diff-popup {
-                                    background: #1e1e1e;
-                                    border-radius: 8px;
-                                    width: 90%;
-                                    height: 90%;
-                                    display: flex;
-                                    flex-direction: column;
-                                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-                                }
-                                .diff-popup-header {
-                                    padding: 16px;
-                                    border-bottom: 1px solid #333;
-                                    display: flex;
-                                    justify-content: space-between;
-                                    align-items: center;
-                                }
-                                .diff-popup-header h3 {
-                                    margin: 0;
-                                    color: #fff;
-                                }
-                                .diff-view-options {
-                                    color: #fff;
-                                }
-                                .diff-popup-content {
-                                    flex: 1;
-                                    position: relative;
-                                    overflow: hidden;
-                                    min-height: 0;
-                                }
-                                .diff-editor-container {
-                                    position: absolute;
-                                    top: 0;
-                                    left: 0;
-                                    right: 0;
-                                    bottom: 0;
-                                }
-                                .diff-popup-footer {
-                                    padding: 16px;
-                                    border-top: 1px solid #333;
-                                    display: flex;
-                                    justify-content: flex-end;
-                                    gap: 8px;
-                                }
-                                .diff-popup-footer button {
-                                    padding: 8px 16px;
-                                    border: none;
-                                    border-radius: 4px;
-                                    cursor: pointer;
-                                    font-size: 14px;
-                                    background: #dc3545;
-                                    color: white;
-                                }
-                            </style>
-                        `).appendTo('head');
+                        // Debug container dimensions
+                        const containerElement = popupContainer.find('.diff-editor-container')[0];
+                        const containerRect = containerElement.getBoundingClientRect();
+                        console.log('Container dimensions:', {
+                            width: containerRect.width,
+                            height: containerRect.height,
+                            top: containerRect.top,
+                            left: containerRect.left
+                        });
+
+                        // Debug Monaco availability
+                        console.log('Monaco editor object:', monaco);
+                        console.log('Monaco editor version:', monaco.editor.EditorVersion);
 
                         // Create diff editor
                         const editorContainer = popupContainer.find('.diff-editor-container')[0];
+                        console.log('Creating diff editor...');
                         
+                        // Wait for container to be properly mounted in DOM
                         setTimeout(() => {
+                            // Initialize the diff editor with proper options
                             const diffEditor = monaco.editor.createDiffEditor(editorContainer, {
                                 renderSideBySide: true,
                                 readOnly: true,
@@ -1080,46 +943,107 @@ export function initChat(container, state) {
                                 automaticLayout: true,
                                 theme: 'vs-dark'
                             });
+                            console.log('Diff editor created:', diffEditor);
 
                             // Get the language from the file extension
+                            const currentFileName = getCurrentFileName();
                             const fileExt = currentFileName.split('.').pop();
                             const language = getMonacoLanguage(fileExt) || 'javascript';
+                            console.log('Detected language:', language);
 
-                            // Create models
+                            console.log('Creating models...');
                             const originalModel = monaco.editor.createModel(originalCode, language);
                             const modifiedModel = monaco.editor.createModel(code, language);
+                            console.log('Models created:', { originalModel, modifiedModel });
 
                             // Set the models
+                            console.log('Setting models on diff editor...');
                             diffEditor.setModel({
                                 original: originalModel,
                                 modified: modifiedModel
                             });
 
-                            // Force initial layout
+                            // Force initial layout after a short delay to ensure container is ready
                             setTimeout(() => {
+                                const dimensions = {
+                                    width: editorContainer.clientWidth,
+                                    height: editorContainer.clientHeight
+                                };
+                                console.log('Container dimensions before layout:', dimensions);
                                 diffEditor.layout();
+                                console.log('Layout forced');
                             }, 100);
 
                             // Handle inline diff toggle
                             popupContainer.find('.inline-diff-toggle').on('change', function() {
+                                console.log('Toggling inline diff mode:', this.checked);
                                 diffEditor.updateOptions({
                                     renderSideBySide: !this.checked
                                 });
+                                // Force layout update after changing view mode
                                 setTimeout(() => {
                                     diffEditor.layout();
+                                    console.log('Layout updated after view mode change');
                                 }, 50);
                             });
 
-                            // Handle close button
-                            popupContainer.find('.reject-changes').on('click', () => {
-                                popupContainer.remove();
-                                styleElement.remove();
-                                originalModel.dispose();
-                                modifiedModel.dispose();
-                                diffEditor.dispose();
+                            return new Promise((resolve, reject) => {
+                                // Handle accept changes
+                                popupContainer.find('.accept-changes').on('click', async () => {
+                                    console.log('Accept changes clicked');
+                                    try {
+                                        // Create and show loading overlay
+                                        const editorOverlay = $(`
+                                            <div class="editor-overlay">
+                                                <div class="loading-spinner">
+                                                    <i class="circle notch loading icon"></i>
+                                                    <span>Applying changes...</span>
+                                                </div>
+                                            </div>
+                                        `).appendTo(document.evaluate('/html/body/div[2]/div/div/div[1]', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue);
+
+                                        // Apply the modified code to the source editor
+                                        sourceEditor.setValue(code);
+                                        
+                                        // Clean up
+                                        popupContainer.remove();
+                                        originalModel.dispose();
+                                        modifiedModel.dispose();
+                                        diffEditor.dispose();
+                                        
+                                        // Remove the editor overlay with a fade effect
+                                        editorOverlay.fadeOut(200, () => {
+                                            editorOverlay.remove();
+                                        });
+                                        
+                                        addMessage('system', 'Changes applied successfully.');
+                                        console.log('Changes applied and cleanup completed');
+                                        resolve(true);
+                                    } catch (error) {
+                                        console.error('Error applying changes:', error);
+                                        // Remove overlay in case of error
+                                        $('.editor-overlay').fadeOut(200, function() {
+                                            $(this).remove();
+                                        });
+                                        addMessage('error', `Error applying changes: ${error.message}`);
+                                        reject(error);
+                                    }
+                                });
+
+                                // Handle reject changes
+                                popupContainer.find('.reject-changes').on('click', () => {
+                                    console.log('Reject changes clicked');
+                                    popupContainer.remove();
+                                    originalModel.dispose();
+                                    modifiedModel.dispose();
+                                    diffEditor.dispose();
+                                    addMessage('system', 'Changes cancelled.');
+                                    console.log('Changes rejected and cleanup completed');
+                                    resolve(false);
+                                });
                             });
                         }, 0);
-                            } catch (error) {
+                    } catch (error) {
                         console.error('Error showing diff view:', error);
                         addMessage('error', 'Error showing diff view: ' + error.message, true);
                     }
@@ -1329,10 +1253,12 @@ export function initChat(container, state) {
             // Process and stream each segment
             for (const segment of segments) {
                 if (segment.type === 'text') {
-                    // Parse markdown for text segments
+                    // Configure marked options for text segments
                     const renderer = new marked.Renderer();
                     renderer.codespan = (code) => `<code class="inline-code">${code}</code>`;
                     renderer.code = (code, language) => `<code class="inline-code">${code}</code>`;
+                    renderer.link = (href, title, text) => 
+                        `<a href="${href}" title="${title || ''}" target="_blank" rel="noopener noreferrer">${text}</a>`;
                     
                     const html = marked.parse(segment.content, { renderer });
                     
@@ -1341,7 +1267,7 @@ export function initChat(container, state) {
                     for (const word of words) {
                         streamingDiv.append(word);
                         chatMessages.scrollTop(chatMessages[0].scrollHeight);
-                        await new Promise(resolve => setTimeout(resolve, 100));
+                        await new Promise(resolve => setTimeout(resolve, 50));
                     }
                 } else {
                     // Create and append code block immediately
@@ -1385,7 +1311,7 @@ export function initChat(container, state) {
                     content.css('height', `${Math.min(200, lineCount * lineHeight + 10)}px`);
                     
                     // Add small delay after code block
-                    await new Promise(resolve => setTimeout(resolve, 100));
+                    await new Promise(resolve => setTimeout(resolve, 50));
                 }
             }
         } catch (error) {
@@ -1397,7 +1323,7 @@ export function initChat(container, state) {
 
     // Handle composer submit
     const handleComposerSubmit = async () => {
-        if (!openAIService) {
+        if (!service) {
             addMessage('error', 'Please enter your OpenAI API key in the Settings tab first.', true);
             chatTabs.filter('[data-tab="SETTINGS"]').click();
             return;
@@ -1420,6 +1346,22 @@ export function initChat(container, state) {
         // Add user message
         addMessage('user', fullMessage, true);
 
+        // Create message div for assistant's response with thinking animation
+        const messageDiv = $('<div></div>')
+            .addClass('message')
+            .addClass('assistant');
+        composerMessages.append(messageDiv);
+
+        // Show thinking animation
+        const thinkingDiv = $('<div></div>')
+            .addClass('thinking-animation')
+            .css({
+                'padding': '0.75rem',
+                'color': '#888'
+            })
+            .html('<i class="circle notch loading icon"></i> Thinking...');
+        messageDiv.append(thinkingDiv);
+
         // Clear input and remove attached code blocks
         composerInput.val('');
         composerInput.css('height', 'auto');
@@ -1436,44 +1378,28 @@ export function initChat(container, state) {
 
         if (isSimpleQuestion) {
             try {
-        // Cancel any ongoing request
-        if (abortController) {
-            abortController.abort();
-        }
-
-        // Create new abort controller for this request
-        abortController = new AbortController();
-
-                const responseStream = openAIService.chat(fullMessage, abortController.signal);
-                
-                // Create message div for assistant's response
-                const messageDiv = $('<div></div>')
-                    .addClass('message')
-                    .addClass('assistant');
-                composerMessages.append(messageDiv);
-
-                // Show thinking animation
-                const thinkingDiv = $('<div></div>')
-                    .addClass('thinking-animation')
-                    .css({
-                        'padding': '0.75rem',
-                        'color': '#888'
-                    })
-                    .html('<i class="circle notch loading icon"></i> Thinking...');
-                messageDiv.append(thinkingDiv);
-
-                // Collect the full response
-                let fullContent = '';
-                for await (const chunk of responseStream) {
-                    fullContent += chunk;
+                // Cancel any ongoing request
+                if (abortController) {
+                    abortController.abort();
                 }
 
+                // Create new abort controller for this request
+                abortController = new AbortController();
+
+                const responseStream = service.chat(fullMessage, abortController.signal);
+                
                 // Remove thinking animation
                 thinkingDiv.remove();
 
                 // Create a div for the response content
                 const streamingDiv = $('<div></div>').css('white-space', 'pre-wrap');
                 messageDiv.append(streamingDiv);
+
+                // Collect the full response
+                let fullContent = '';
+                for await (const chunk of responseStream) {
+                    fullContent += chunk;
+                }
 
                 // Process the response with markdown and code blocks
                 const renderer = new marked.Renderer();
@@ -1502,7 +1428,7 @@ export function initChat(container, state) {
 
         // Initialize composer if not already done
         if (!composer) {
-            composer = new Composer(sourceEditor, openAIService);
+            composer = new Composer(sourceEditor, service);
         }
 
         // Show stop button
@@ -1512,15 +1438,11 @@ export function initChat(container, state) {
             addMessage('system', 'Starting composer process...', true);
 
             const result = await composer.processRequest(fullMessage);
+
+            thinkingDiv.remove();
             
             if (result.needsPreview) {
-                // Create a message div for the assistant's response
-                const messageDiv = $('<div></div>')
-                    .addClass('message')
-                    .addClass('assistant');
-                composerMessages.append(messageDiv);
-
-                // Create the message content
+                // Create the message content in the existing message div
                 const messageContent = $('<div></div>')
                     .addClass('message-content');
 
@@ -1566,7 +1488,7 @@ export function initChat(container, state) {
                 content.css('height', `${Math.min(200, lineCount * lineHeight + 10)}px`);
 
                 // Scroll to the new message
-                composerMessages.scrollTop(composerMessages[0].scrollHeight);
+        composerMessages.scrollTop(composerMessages[0].scrollHeight);
 
                 addMessage('system', 'Applying & Analyzing changes...', true);
                 
@@ -1644,7 +1566,7 @@ export function initChat(container, state) {
             
             // Initialize bug finder if needed
             if (!bugFinder) {
-                bugFinder = new BugFinder(sourceEditor, openAIService);
+                bugFinder = new BugFinder(sourceEditor, service);
             }
 
             // Show stop button
@@ -1653,7 +1575,21 @@ export function initChat(container, state) {
             // Get stdin from the stdin editor if it exists
             const stdin = window.stdinEditor ? window.stdinEditor.getValue().trim() : '';
 
-            addMessage('system', 'Analyzing code for bugs...', false, true);
+            // Create message div for assistant's response with thinking animation
+            const messageDiv = $('<div></div>')
+                .addClass('message')
+                .addClass('assistant');
+            bugfinderMessages.append(messageDiv);
+
+            // Show thinking animation
+            const thinkingDiv = $('<div></div>')
+                .addClass('thinking-animation')
+                .css({
+                    'padding': '0.75rem',
+                    'color': '#888'
+                })
+                .html('<i class="circle notch loading icon"></i> Thinking...');
+            messageDiv.append(thinkingDiv);
 
             // Only pass non-empty values
             const result = await bugFinder.findBugs(
@@ -1661,16 +1597,13 @@ export function initChat(container, state) {
                 stdin || undefined
             );
             
+            // Remove thinking animation
+            thinkingDiv.remove();
+
             if (result.success) {
                 if (!result.hasBugs) {
                     addMessage('system', '✓ ' + result.message, false, true);
                 } else {
-                    // Create a message div for the assistant's response
-                    const messageDiv = $('<div></div>')
-                        .addClass('message')
-                        .addClass('assistant');
-                    bugfinderMessages.append(messageDiv);
-
                     // Create the message content with Markdown support
                     const messageContent = $('<div></div>')
                         .addClass('message-content');
@@ -1789,7 +1722,7 @@ export function initChat(container, state) {
 
     // Update the existing handleSubmit to only handle chat
     const handleSubmit = async () => {
-        if (!openAIService) {
+        if (!service) {
             addMessage('error', 'Please enter your OpenAI API key in the Settings tab first.');
             chatTabs.filter('[data-tab="SETTINGS"]').click();
                     return;
@@ -1826,7 +1759,7 @@ export function initChat(container, state) {
         chatInput.parent().parent().prevAll('.code-block-container').remove();
 
         try {
-            const responseStream = openAIService.chat(fullMessage, abortController.signal);
+            const responseStream = service.chat(fullMessage, abortController.signal);
                 await handleStreamingResponse(responseStream);
         } catch (error) {
             if (error.message !== 'Request was cancelled') {
@@ -1861,15 +1794,42 @@ export function initChat(container, state) {
 
     // Remove the old selection handler
     $(document).off('selectionchange');
+
+    // Update model selection handling
+    modelList.on('click', '.model-card', function() {
+        const modelName = $(this).find('.model-name').text();
+        const ServiceClass = service.constructor;
+        const modelId = Object.entries(ServiceClass.MODEL_INFO).find(
+            ([_, info]) => info.displayName === modelName
+        )?.[0];
+
+        if (modelId) {
+            // Update visual selection
+            modelList.find('.model-card').removeClass('selected');
+            $(this).addClass('selected');
+            
+            // Update service model
+            service.setModel(modelId);
+            
+            // Update the model selector in the chat interface
+            modelSelector.val(modelId);
+            
+            addMessage('system', `Model switched to ${modelName}`);
+        }
+    });
+
+    // Return addMessage function so it can be used elsewhere
+    return {
+        addMessage
+    };
 }
 
-async function applyChanges(sourceEditor, code, openAIService, addMessage, chatMessages) {
+async function applyChanges(sourceEditor, code, service, addMessage, chatMessages) {
     console.log('Starting applyChanges function');
     try {
         // Debug input parameters
         console.log('Source editor:', sourceEditor);
         console.log('Code to apply:', code);
-        console.log('OpenAI service:', openAIService);
 
         // Get the user message that came before the AI response
         const messages = Array.from(chatMessages.children());
@@ -1882,9 +1842,9 @@ async function applyChanges(sourceEditor, code, openAIService, addMessage, chatM
         console.log('Found AI message index:', aiMessageIndex);
         
         const userMessage = aiMessageIndex > 0 
-            ? $(messages[aiMessageIndex - 1]).hasClass('user')
+            ? ($(messages[aiMessageIndex - 1]).hasClass('user')
                 ? $(messages[aiMessageIndex - 1]).find('.message-content').text()
-                : ''
+                : '')
             : '';
         console.log('User message context:', userMessage);
 
@@ -1895,7 +1855,7 @@ async function applyChanges(sourceEditor, code, openAIService, addMessage, chatM
 
         // Get AI's suggestion for the complete modified file
         console.log('Requesting modified code from OpenAI...');
-        const modifiedCode = await openAIService.integrateCode(originalCode, code, null, userMessage);
+        const modifiedCode = await service.integrateCode(originalCode, code, null, userMessage);
         console.log('Modified code length:', modifiedCode.length);
         console.log('Modified code preview:', modifiedCode.substring(0, 200) + '...');
 
@@ -1937,110 +1897,6 @@ async function applyChanges(sourceEditor, code, openAIService, addMessage, chatM
             top: containerRect.top,
             left: containerRect.left
         });
-
-        // Add styles for the popup
-        const styleElement = $(`
-            <style>
-                .diff-popup-overlay {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    background: rgba(0, 0, 0, 0.7);
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    z-index: 9999;
-                }
-                .loading-overlay {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    background: rgba(0, 0, 0, 0.5);
-                    display: flex;
-                    flex-direction: column;
-                    justify-content: center;
-                    align-items: center;
-                    z-index: 10000;
-                    color: white;
-                    font-size: 16px;
-                }
-                .loading-overlay .spinner {
-                    width: 50px;
-                    height: 50px;
-                    border: 3px solid transparent;
-                    border-top-color: #fff;
-                    border-radius: 50%;
-                    animation: spin 1s linear infinite;
-                    margin-bottom: 10px;
-                }
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-                .diff-popup {
-                    background: #1e1e1e;
-                    border-radius: 8px;
-                    width: 90%;
-                    height: 90%;
-                    display: flex;
-                    flex-direction: column;
-                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-                }
-                .diff-popup-header {
-                    padding: 16px;
-                    border-bottom: 1px solid #333;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                }
-                .diff-popup-header h3 {
-                    margin: 0;
-                    color: #fff;
-                }
-                .diff-view-options {
-                    color: #fff;
-                }
-                .diff-popup-content {
-                    flex: 1;
-                    position: relative;
-                    overflow: hidden;
-                    min-height: 0;
-                }
-                .diff-editor-container {
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                }
-                .diff-popup-footer {
-                    padding: 16px;
-                    border-top: 1px solid #333;
-                    display: flex;
-                    justify-content: flex-end;
-                    gap: 8px;
-                }
-                .diff-popup-footer button {
-                    padding: 8px 16px;
-                    border: none;
-                    border-radius: 4px;
-                    cursor: pointer;
-                    font-size: 14px;
-                }
-                .diff-popup-footer .accept-changes {
-                    background: #28a745;
-                    color: white;
-                }
-                .diff-popup-footer .reject-changes {
-                    background: #dc3545;
-                    color: white;
-                }
-            </style>
-        `).appendTo('head');
 
         // Debug Monaco availability
         console.log('Monaco editor object:', monaco);
@@ -2130,7 +1986,6 @@ async function applyChanges(sourceEditor, code, openAIService, addMessage, chatM
                         
                         // Clean up
                         popupContainer.remove();
-                        styleElement.remove();
                         originalModel.dispose();
                         modifiedModel.dispose();
                         diffEditor.dispose();
@@ -2143,8 +1998,8 @@ async function applyChanges(sourceEditor, code, openAIService, addMessage, chatM
                         addMessage('system', 'Changes applied successfully.');
                         console.log('Changes applied and cleanup completed');
                         resolve(true);
-    } catch (error) {
-        console.error('Error applying changes:', error);
+                    } catch (error) {
+                        console.error('Error applying changes:', error);
                         // Remove overlay in case of error
                         $('.editor-overlay').fadeOut(200, function() {
                             $(this).remove();
@@ -2158,7 +2013,6 @@ async function applyChanges(sourceEditor, code, openAIService, addMessage, chatM
                 popupContainer.find('.reject-changes').on('click', () => {
                     console.log('Reject changes clicked');
                     popupContainer.remove();
-                    styleElement.remove();
                     originalModel.dispose();
                     modifiedModel.dispose();
                     diffEditor.dispose();

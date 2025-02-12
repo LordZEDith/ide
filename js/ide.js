@@ -1,7 +1,8 @@
 import { usePuter } from "./puter.js";
 import { initChat } from "./chat.js";
-import { AutoComplete } from './autocomplete.js';
-import { OpenAIService } from './openai-service.js';
+import { AutoComplete } from './auto_complete.js';
+import { OpenAIService } from './openai_service.js';
+import { AnthropicService } from './anthropic_service.js';
 
 const API_KEY = ""; // Get yours at https://platform.sulu.sh/apis/judge0
 
@@ -101,6 +102,8 @@ var layoutConfig = {
 };
 
 var gPuterFile;
+
+let addMessageFunc;
 
 function encode(str) {
     return btoa(unescape(encodeURIComponent(str || "")));
@@ -566,6 +569,9 @@ document.addEventListener("DOMContentLoaded", async function () {
                 }
             });
 
+            // Make sourceEditor available globally
+            window.sourceEditor = sourceEditor;
+
             sourceEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
         });
 
@@ -596,7 +602,8 @@ document.addEventListener("DOMContentLoaded", async function () {
         });
 
         layout.registerComponent("chat", function(container, state) {
-            initChat(container, state);
+            const chatInterface = initChat(container, state);
+            addMessageFunc = chatInterface.addMessage;
         });
 
         layout.on("initialised", function () {
@@ -604,95 +611,65 @@ document.addEventListener("DOMContentLoaded", async function () {
             refreshLayoutSize();
             window.top.postMessage({ event: "initialised" }, "*");
 
-            // Initialize AutoComplete with the editor instance
-            let autoComplete;
-            let openAIService;
+            // Initialize service variables
+            let service;
 
-            // Function to update API key status indicator
-            async function updateApiKeyStatus(apiKey) {
-                if (!apiKey) {
-                    $('.api-key-status').removeClass('valid invalid');
-                    return;
-                }
-
-                try {
-                    const tempService = new OpenAIService(apiKey);
-                    const isValid = await tempService.validateApiKey();
-                    
-                    $('.api-key-status').removeClass('valid invalid');
-                    if (isValid) {
-                        $('.api-key-status').addClass('valid');
-                    } else {
-                        $('.api-key-status').addClass('invalid');
-                    }
-                } catch (error) {
-                    console.error('Error validating API key:', error);
-                    $('.api-key-status').removeClass('valid').addClass('invalid');
+            // Helper function to create appropriate service instance
+            function createService(type, apiKey) {
+                switch (type?.toLowerCase()) {
+                    case 'anthropic':
+                        return new AnthropicService(apiKey);
+                    case 'openai':
+                    default:
+                        return new OpenAIService(apiKey);
                 }
             }
-
-            // When OpenAI service is initialized or API key changes:
-            function initializeOpenAIService(apiKey) {
-                try {
-                    openAIService = new OpenAIService(apiKey);
-                    // Initialize or reinitialize autocomplete
-                    if (autoComplete) {
-                        autoComplete.openAIService = openAIService;
-                    } else if (sourceEditor) {
-                        autoComplete = new AutoComplete(sourceEditor, openAIService);
-                    }
-                    console.log('OpenAI service and autocomplete initialized successfully');
-                } catch (error) {
-                    console.error('Error initializing OpenAI service:', error);
-                }
-            }
-
             // Handle API key submission
             $('#judge0-site-content').find('.api-key-submit').on('click', async () => {
+                const serviceType = $('.service-selector').val();
                 const apiKey = $('.api-key-input').val().trim();
                 if (!apiKey) {
-                    addMessage('error', 'Please enter an API key.');
                     return;
                 }
 
                 try {
-                    initializeOpenAIService(apiKey);
-                    const isValid = await openAIService.validateApiKey();
+                    service = createService(serviceType, apiKey);
+                    const isValid = await service.validateApiKey();
                     
                     if (!isValid) {
-                        addMessage('error', 'Invalid API key. Please check your key and try again.');
                         $('.api-key-status').removeClass('valid').addClass('invalid');
                         return;
                     }
 
-                    localStorage.setItem('openai_api_key', apiKey);
                     $('.api-key-status').removeClass('invalid').addClass('valid');
                     $('.settings-container').hide();
                     $('.chat-messages').show();
                     $('.chat-input').parent().parent().show();
                     $('.chat-tab[data-tab="CHAT"]').click();
-                    addMessage('system', 'API key saved successfully. You can now use the chat!');
                 } catch (error) {
                     $('.api-key-status').removeClass('valid').addClass('invalid');
-                    addMessage('error', 'Error validating API key: ' + error.message);
                 }
             });
 
             // Check for saved API key and initialize if found
-            const savedApiKey = localStorage.getItem('openai_api_key');
+            const savedServiceType = localStorage.getItem('last_service_type') || 'openai';
+            const savedApiKey = localStorage.getItem(`${savedServiceType}_api_key`);
+            
+            // Set the service selector to the saved value and trigger change event
+            $('.service-selector').val(savedServiceType).trigger('change');
+            
             if (savedApiKey) {
                 try {
-                    initializeOpenAIService(savedApiKey);
+                    service = createService(savedServiceType, savedApiKey);
                     $('.api-key-input').val(savedApiKey);
-                    updateApiKeyStatus(savedApiKey);
+                    $('.api-key-status').removeClass('invalid').addClass('valid');
                     $('.settings-container').hide();
                 } catch (error) {
-                    console.error('Error initializing OpenAI service:', error);
+                    console.error('Error initializing service:', error);
                     $('.settings-container').show();
                 }
             } else {
                 $('.settings-container').show();
-                addMessage('system', 'Please enter your OpenAI API key in the Settings tab to start chatting.');
             }
         });
 
